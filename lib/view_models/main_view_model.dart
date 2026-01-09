@@ -7,18 +7,19 @@ import 'package:acquisition_mobile/managers/ble_manager.dart';
 import 'package:acquisition_mobile/models/packet.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-enum ConnectionType { serial, wifi, ble }
+enum ConnectionType { wifi, ble }
 
 class MainViewModel extends ChangeNotifier {
-  // Connection Managers
-  SerialManager? _serialManager;
-  WifiManager? _wifiManager;
-  BleManager? _bleManager;
-  ConnectionInterface? _currentConnection;
+  // Input Source (Always Serial)
+  final SerialManager _serialManager = SerialManager();
+  bool _isSerialConnected = false;
+
+  // Output Sink (Optional)
+  Sink? _sink;
+  bool _isSinkConnected = false;
+  ConnectionType _selectedSinkType = ConnectionType.wifi;
 
   // State
-  ConnectionType _selectedConnectionType = ConnectionType.serial;
-  bool _isConnected = false;
   bool _isAcquiring = false;
   final List<Packet> _packets = [];
 
@@ -34,8 +35,9 @@ class MainViewModel extends ChangeNotifier {
   bool _isScanning = false;
 
   // Getters
-  ConnectionType get selectedConnectionType => _selectedConnectionType;
-  bool get isConnected => _isConnected;
+  bool get isSerialConnected => _isSerialConnected;
+  bool get isSinkConnected => _isSinkConnected;
+  ConnectionType get selectedSinkType => _selectedSinkType;
   bool get isAcquiring => _isAcquiring;
   List<Packet> get packets => _packets;
 
@@ -50,43 +52,56 @@ class MainViewModel extends ChangeNotifier {
   bool get isScanning => _isScanning;
 
   MainViewModel() {
-    _initSerial();
+    _refreshSerialPorts();
+    // Listen to packets from Serial (as Source)
+    _serialManager.packetStream.listen((packet) {
+      // 1. Store local for Display
+      _packets.add(packet);
+      if (_packets.length > 512 * 5) {
+        _packets.removeAt(0);
+      }
+
+      // 2. Forward to Sink (Bridge)
+      if (_isSinkConnected && _sink != null) {
+        _sink!.send(packet.toBytes());
+      }
+
+      notifyListeners();
+    });
   }
 
-  void _initSerial() {
-    try {
-      _serialManager = SerialManager();
-      _refreshSerialPorts();
-    } catch (e) {
-      print("Serial not supported (possibly on Web?): $e");
-    }
-  }
-
-  void setConnectionType(ConnectionType type) {
-    if (_isConnected) return; // Must disconnect first
-    _selectedConnectionType = type;
+  void setSinkType(ConnectionType type) {
+    if (_isSinkConnected) return; // Must disconnect first
+    _selectedSinkType = type;
     notifyListeners();
   }
 
   // Serial Methods
-  void _refreshSerialPorts() {
-    if (_serialManager != null) {
-      _availableSerialPorts = _serialManager!.getAvailablePorts();
-      _selectedSerialPort = _availableSerialPorts.isNotEmpty
-          ? _availableSerialPorts.first
-          : null;
-      notifyListeners();
+  Future<void> _refreshSerialPorts() async {
+    List<String> ports = [];
+    try {
+      ports = await _serialManager.getAndroidPorts();
+      if (ports.isEmpty) {
+        ports = _serialManager.getAvailablePorts();
+      }
+    } catch (e) {
+      print("Error refreshing ports: $e");
     }
+    _availableSerialPorts = ports;
+    _selectedSerialPort = _availableSerialPorts.isNotEmpty
+        ? _availableSerialPorts.first
+        : null;
+    notifyListeners();
   }
 
-  void refreshPorts() => _refreshSerialPorts(); // Public alias
+  Future<void> refreshSerialPorts() => _refreshSerialPorts();
 
   void selectSerialPort(String? port) {
     _selectedSerialPort = port;
     notifyListeners();
   }
 
-  // WiFi Methods
+  // WiFi Inputs
   void setWifiIp(String ip) {
     _wifiIp = ip;
     notifyListeners();
@@ -118,78 +133,70 @@ class MainViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Common Connection Methods
-  Future<void> connect() async {
-    _currentConnection?.dispose();
-    _currentConnection = null;
+  // --- CONNECT LOGIC --- //
 
+  // 1. Connect Input (Serial)
+  Future<void> connectSerial() async {
+    if (_selectedSerialPort != null) {
+      _isSerialConnected = await _serialManager.connect(_selectedSerialPort!);
+      notifyListeners();
+    }
+  }
+
+  Future<void> disconnectSerial() async {
+    if (_isAcquiring) await stopAcquisition();
+    await _serialManager.disconnect();
+    _isSerialConnected = false;
+    notifyListeners();
+  }
+
+  // 2. Connect Output (Sink)
+  Future<void> connectSink() async {
+    _sink?.dispose();
+    _sink = null;
     bool success = false;
 
-    switch (_selectedConnectionType) {
-      case ConnectionType.serial:
-        if (_serialManager == null) _initSerial(); // Lazy init retry
-        if (_serialManager != null && _selectedSerialPort != null) {
-          _currentConnection = _serialManager;
-          success = await _currentConnection!.connect(_selectedSerialPort!);
-        }
-        break;
-
+    switch (_selectedSinkType) {
       case ConnectionType.wifi:
-        _wifiManager ??= WifiManager();
-        _currentConnection = _wifiManager;
-        success = await _currentConnection!.connect("$_wifiIp:$_wifiPort");
+        final wifi = WifiManager();
+        success = await wifi.connect("$_wifiIp:$_wifiPort");
+        if (success) _sink = wifi;
         break;
-
       case ConnectionType.ble:
-        _bleManager ??= BleManager();
         if (_selectedBleDevice != null) {
-          _currentConnection = _bleManager;
-          success = await _currentConnection!.connect(
-            _selectedBleDevice!.device.remoteId.str,
-          );
+          final ble = BleManager();
+          success = await ble.connect(_selectedBleDevice!.device.remoteId.str);
+          if (success) _sink = ble;
         }
         break;
     }
 
-    if (success && _currentConnection != null) {
-      _isConnected = true;
-      _currentConnection!.packetStream.listen((packet) {
-        _packets.add(packet);
-        if (_packets.length > 512 * 5) {
-          // Keep 5 seconds of data
-          _packets.removeAt(0);
-        }
-        notifyListeners();
-      });
-    } else {
-      _isConnected = false;
-      _currentConnection = null;
-    }
+    _isSinkConnected = success;
     notifyListeners();
   }
 
-  Future<void> disconnect() async {
-    if (_isAcquiring) {
-      await stopAcquisition();
-    }
-    await _currentConnection?.disconnect();
-    _isConnected = false;
+  Future<void> disconnectSink() async {
+    await _sink?.disconnect();
+    _sink = null;
+    _isSinkConnected = false;
     notifyListeners();
   }
+
+  // --- CONTROL LOGIC --- //
 
   Future<void> startAcquisition() async {
-    if (_currentConnection != null && _isConnected) {
-      if (await _currentConnection!.start()) {
+    if (_isSerialConnected) {
+      if (await _serialManager.start()) {
         _isAcquiring = true;
-        _packets.clear(); // Clear old data on start
+        _packets.clear();
         notifyListeners();
       }
     }
   }
 
   Future<void> stopAcquisition() async {
-    if (_currentConnection != null && _isConnected) {
-      if (await _currentConnection!.stop()) {
+    if (_isSerialConnected) {
+      if (await _serialManager.stop()) {
         _isAcquiring = false;
         notifyListeners();
       }
@@ -198,9 +205,8 @@ class MainViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
-    _serialManager?.dispose();
-    _wifiManager?.dispose();
-    _bleManager?.dispose();
+    _serialManager.dispose();
+    _sink?.dispose();
     super.dispose();
   }
 }

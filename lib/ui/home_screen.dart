@@ -10,12 +10,16 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Acquisition Mobile')),
+      appBar: AppBar(title: const Text('Acquisition Bridge')),
       body: Padding(
         padding: const EdgeInsets.all(8.0),
         child: Column(
           children: [
-            _buildConnectionCard(context),
+            _buildInputCard(context),
+            const SizedBox(height: 8),
+            _buildOutputCard(context),
+            const SizedBox(height: 8),
+            _buildControlCard(context),
             const SizedBox(height: 10),
             Expanded(child: _buildChart(context)),
           ],
@@ -24,108 +28,187 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildConnectionCard(BuildContext context) {
+  Widget _buildInputCard(BuildContext context) {
     final viewModel = Provider.of<MainViewModel>(context);
-
     return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.input, color: Colors.blue),
+                const SizedBox(width: 8),
+                const Text(
+                  "Input Source (Serial)",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                if (viewModel.isSerialConnected)
+                  const Chip(
+                    label: Text(
+                      "Connected",
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    backgroundColor: Colors.green,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (!viewModel.isSerialConnected)
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        value: viewModel.selectedSerialPort,
+                        hint: const Text("Select Port"),
+                        items: viewModel.availableSerialPorts.map((port) {
+                          return DropdownMenuItem(
+                            value: port,
+                            child: Text(port),
+                          );
+                        }).toList(),
+                        onChanged: viewModel.selectSerialPort,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: viewModel.refreshSerialPorts,
+                  ),
+                ],
+              ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: viewModel.isSerialConnected
+                    ? viewModel.disconnectSerial
+                    : viewModel.connectSerial,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: viewModel.isSerialConnected
+                      ? Colors.red.shade100
+                      : Colors.blue.shade100,
+                  foregroundColor: Colors.black,
+                ),
+                child: Text(
+                  viewModel.isSerialConnected
+                      ? "Disconnect Serial"
+                      : "Connect Serial",
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOutputCard(BuildContext context) {
+    final viewModel = Provider.of<MainViewModel>(context);
+    return Card(
+      elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
           children: [
-            // 1. Connection Type Selector using Tabs/Segmented Control look
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildTypeButton(
-                  context,
-                  ConnectionType.serial,
-                  "Serial",
-                  Icons.usb,
+                const Icon(Icons.output, color: Colors.orange),
+                const SizedBox(width: 8),
+                const Text(
+                  "Output Sink (Bridge)",
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-                _buildTypeButton(
-                  context,
-                  ConnectionType.wifi,
-                  "WiFi",
-                  Icons.wifi,
-                ),
-                _buildTypeButton(
-                  context,
-                  ConnectionType.ble,
-                  "Bluetooth",
-                  Icons.bluetooth,
-                ),
+                const Spacer(),
+                if (viewModel.isSinkConnected)
+                  Chip(
+                    label: Text(
+                      "Connected (${viewModel.selectedSinkType.name.toUpperCase()})",
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    backgroundColor: Colors.green,
+                  ),
               ],
             ),
-            const Divider(),
+            const SizedBox(height: 8),
+            if (!viewModel.isSinkConnected) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildTypeButton(
+                    context,
+                    ConnectionType.wifi,
+                    "WiFi",
+                    Icons.wifi,
+                  ),
+                  _buildTypeButton(
+                    context,
+                    ConnectionType.ble,
+                    "Bluetooth",
+                    Icons.bluetooth,
+                  ),
+                ],
+              ),
+              const Divider(),
+              _buildInputsForSink(context, viewModel),
+              const SizedBox(height: 8),
+            ],
 
-            // 2. Specific Connection Inputs
-            if (!viewModel.isConnected) _buildInputsForType(context, viewModel),
-
-            // 3. Status
-            if (viewModel.isConnected)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.check_circle, color: Colors.green),
-                    const SizedBox(width: 8),
-                    Text(
-                      "Connected (${viewModel.selectedConnectionType.name.toUpperCase()})",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
-                    ),
-                  ],
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: viewModel.isSinkConnected
+                    ? viewModel.disconnectSink
+                    : viewModel.connectSink,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: viewModel.isSinkConnected
+                      ? Colors.red.shade100
+                      : Colors.orange.shade100,
+                  foregroundColor: Colors.black,
+                ),
+                child: Text(
+                  viewModel.isSinkConnected
+                      ? "Disconnect Sink"
+                      : "Connect Sink",
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-            const SizedBox(height: 10),
-
-            // 4. Action Buttons (Connect/Disconnect & Start/Stop)
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: viewModel.isConnected
-                        ? viewModel.disconnect
-                        : viewModel.connect,
-                    icon: Icon(
-                      viewModel.isConnected ? Icons.close : Icons.link,
-                    ),
-                    label: Text(
-                      viewModel.isConnected ? "Disconnect" : "Connect",
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: viewModel.isConnected
-                          ? Colors.red.shade100
-                          : Colors.blue.shade100,
-                      foregroundColor: Colors.black,
-                    ),
-                  ),
+  Widget _buildControlCard(BuildContext context) {
+    final viewModel = Provider.of<MainViewModel>(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: !viewModel.isSerialConnected
+                    ? null
+                    : (viewModel.isAcquiring
+                          ? viewModel.stopAcquisition
+                          : viewModel.startAcquisition),
+                icon: Icon(
+                  viewModel.isAcquiring ? Icons.stop : Icons.play_arrow,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: !viewModel.isConnected
-                        ? null
-                        : (viewModel.isAcquiring
-                              ? viewModel.stopAcquisition
-                              : viewModel.startAcquisition),
-                    icon: Icon(
-                      viewModel.isAcquiring ? Icons.stop : Icons.play_arrow,
-                    ),
-                    label: Text(viewModel.isAcquiring ? "Stop" : "Start"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: viewModel.isAcquiring
-                          ? Colors.orange.shade100
-                          : Colors.green.shade100,
-                      foregroundColor: Colors.black,
-                    ),
-                  ),
+                label: Text(viewModel.isAcquiring ? "Stop" : "Start"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: viewModel.isAcquiring
+                      ? Colors.orange.shade100
+                      : Colors.green.shade100,
+                  foregroundColor: Colors.black,
                 ),
-              ],
+              ),
             ),
           ],
         ),
@@ -140,25 +223,25 @@ class HomeScreen extends StatelessWidget {
     IconData icon,
   ) {
     final viewModel = Provider.of<MainViewModel>(context);
-    final isSelected = viewModel.selectedConnectionType == type;
+    final isSelected = viewModel.selectedSinkType == type;
 
     return InkWell(
-      onTap: () => viewModel.setConnectionType(type),
+      onTap: () => viewModel.setSinkType(type),
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blue.withValues(alpha: 0.1) : null,
+          color: isSelected ? Colors.orange.withValues(alpha: 0.1) : null,
           borderRadius: BorderRadius.circular(8),
-          border: isSelected ? Border.all(color: Colors.blue) : null,
+          border: isSelected ? Border.all(color: Colors.orange) : null,
         ),
         child: Column(
           children: [
-            Icon(icon, color: isSelected ? Colors.blue : Colors.grey),
+            Icon(icon, color: isSelected ? Colors.orange : Colors.grey),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? Colors.blue : Colors.grey,
+                color: isSelected ? Colors.orange : Colors.grey,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
@@ -168,30 +251,8 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildInputsForType(BuildContext context, MainViewModel viewModel) {
-    switch (viewModel.selectedConnectionType) {
-      case ConnectionType.serial:
-        return Row(
-          children: [
-            Expanded(
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  isExpanded: true,
-                  value: viewModel.selectedSerialPort,
-                  hint: const Text("Select Serial Port"),
-                  items: viewModel.availableSerialPorts.map((port) {
-                    return DropdownMenuItem(value: port, child: Text(port));
-                  }).toList(),
-                  onChanged: viewModel.selectSerialPort,
-                ),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: viewModel.refreshPorts,
-            ),
-          ],
-        );
+  Widget _buildInputsForSink(BuildContext context, MainViewModel viewModel) {
+    switch (viewModel.selectedSinkType) {
       case ConnectionType.wifi:
         return Row(
           children: [
@@ -202,6 +263,7 @@ class HomeScreen extends StatelessWidget {
                 decoration: const InputDecoration(
                   labelText: "IP Address",
                   border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.all(8),
                 ),
                 onChanged: viewModel.setWifiIp,
               ),
@@ -214,6 +276,7 @@ class HomeScreen extends StatelessWidget {
                 decoration: const InputDecoration(
                   labelText: "Port",
                   border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.all(8),
                 ),
                 onChanged: viewModel.setWifiPort,
               ),
@@ -231,7 +294,7 @@ class HomeScreen extends StatelessWidget {
                     child: DropdownButton<ScanResult>(
                       isExpanded: true,
                       value: viewModel.selectedBleDevice,
-                      hint: const Text("Select Bluetooth Device"),
+                      hint: const Text("Select BLE Device"),
                       items: viewModel.bleDevices.map((r) {
                         return DropdownMenuItem(
                           value: r,
@@ -261,9 +324,7 @@ class HomeScreen extends StatelessWidget {
     final viewModel = Provider.of<MainViewModel>(context);
     return LineChart(
       LineChartData(
-        lineTouchData: const LineTouchData(
-          enabled: false,
-        ), // Disable touch for performance
+        lineTouchData: const LineTouchData(enabled: false),
         gridData: const FlGridData(show: true, drawVerticalLine: false),
         titlesData: const FlTitlesData(
           bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -277,7 +338,6 @@ class HomeScreen extends StatelessWidget {
           _buildLineChartBarData(viewModel.packets, 0),
           _buildLineChartBarData(viewModel.packets, 1),
         ],
-        // Optimize rendering by limiting X-range window logic managed in ViewModel (fixed packet list)
       ),
     );
   }
@@ -292,7 +352,7 @@ class HomeScreen extends StatelessWidget {
             : packet.ch1Raw.toDouble();
         return FlSpot(index.toDouble(), value);
       }).toList(),
-      isCurved: false, // Performance
+      isCurved: false,
       color: channel == 0 ? Colors.red : Colors.blue,
       dotData: const FlDotData(show: false),
       barWidth: 1.5,
